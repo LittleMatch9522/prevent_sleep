@@ -206,8 +206,13 @@ jobs:
       - name: Smoke-test installed application
         run: |
           test -x /usr/bin/prevent-sleep
+          Xvfb :99 -screen 0 1024x768x24 -nolisten tcp >/tmp/prevent-sleep-xvfb.log 2>&1 &
+          xvfb_pid=$!
+          trap 'kill "$xvfb_pid" 2>/dev/null || true' EXIT
+          export DISPLAY=:99
+          sleep 1
           set +e
-          timeout 5s xvfb-run -a /usr/bin/prevent-sleep
+          timeout 5s /usr/bin/prevent-sleep
           status=$?
           set -e
           test "$status" -eq 124
