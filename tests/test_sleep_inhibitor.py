@@ -34,7 +34,10 @@ class SleepInhibitorTests(unittest.TestCase):
     def test_systemd_backend_holds_inhibitor_until_released(self):
         process = FakeProcess()
         popen_factory = Mock(return_value=process)
-        inhibitor = SystemdSleepInhibitor(popen_factory=popen_factory)
+        inhibitor = SystemdSleepInhibitor(
+            popen_factory=popen_factory,
+            gnome_session_inhibit=True,
+        )
 
         inhibitor.acquire()
 
