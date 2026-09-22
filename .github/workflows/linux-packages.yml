@@ -1,0 +1,290 @@
+name: Linux packages
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "feat/**"
+    tags:
+      - "v1.2.0"
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.10"
+  APPIMAGE_TOOL_VERSION: "1.9.1"
+  APPIMAGE_TOOL_SHA256: "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
+  APPIMAGE_RUNTIME_VERSION: "20251108"
+  APPIMAGE_RUNTIME_SHA256: "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d"
+
+jobs:
+  build-binary:
+    name: Build and unit-test PyInstaller binary
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4.2.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5.6.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Linux test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            desktop-file-utils file libx11-6 libxtst6 python3-tk xvfb
+
+      - name: Install build dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+
+      - name: Run tests and static checks
+        run: |
+          python -m unittest discover -s tests -v
+          python -m py_compile src/*.py linux_packaging/*.py build.py
+          git diff --check
+          desktop-file-validate prevent-sleep.desktop
+
+      - name: Build shared executable
+        run: python build.py
+
+      - name: Verify executable
+        run: |
+          file dist/prevent-sleep
+          test -x dist/prevent-sleep
+          ! grep -R "/home/tsdl/" -- dist/prevent-sleep prevent-sleep.desktop
+
+      - name: Upload shared executable
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: prevent-sleep-binary
+          path: dist/prevent-sleep
+          if-no-files-found: error
+          retention-days: 7
+
+  package-deb:
+    name: Build Debian package
+    needs: build-binary
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4.2.2
+
+      - name: Download shared executable
+        uses: actions/download-artifact@v4.3.0
+        with:
+          name: prevent-sleep-binary
+          path: dist
+
+      - name: Install package validation tools
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y desktop-file-utils file
+
+      - name: Build and inspect Debian package
+        run: |
+          python3 -m linux_packaging.build_packages \
+            --format deb \
+            --binary dist/prevent-sleep \
+            --output-dir artifacts
+          desktop-file-validate prevent-sleep.desktop
+          deb_package=$(find artifacts -maxdepth 1 -type f -name '*.deb' -print -quit)
+          test -n "$deb_package"
+          dpkg-deb --info "$deb_package"
+          dpkg-deb --contents "$deb_package"
+
+      - name: Upload Debian package
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: prevent-sleep-deb
+          path: artifacts/*.deb
+          if-no-files-found: error
+          retention-days: 7
+
+  package-rpm:
+    name: Build RPM package on Fedora
+    needs: build-binary
+    runs-on: ubuntu-22.04
+    container:
+      image: fedora:44
+    steps:
+      - name: Install RPM build tools
+        run: dnf install -y desktop-file-utils file git python3 rpm-build
+
+      - name: Check out source
+        uses: actions/checkout@v4.2.2
+
+      - name: Download shared executable
+        uses: actions/download-artifact@v4.3.0
+        with:
+          name: prevent-sleep-binary
+          path: dist
+
+      - name: Build and inspect RPM package
+        run: |
+          python3 -m linux_packaging.build_packages \
+            --format rpm \
+            --binary dist/prevent-sleep \
+            --output-dir artifacts
+          rpm_package=$(find artifacts -maxdepth 1 -type f -name '*.rpm' -print -quit)
+          test -n "$rpm_package"
+          rpm -qip "$rpm_package"
+          rpm -qpR "$rpm_package"
+          rpm -qpl "$rpm_package"
+
+      - name: Upload RPM package
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: prevent-sleep-rpm
+          path: artifacts/*.rpm
+          if-no-files-found: error
+          retention-days: 7
+
+  test-rpm-install:
+    name: Install RPM on ${{ matrix.name }}
+    needs: package-rpm
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Fedora
+            image: fedora:44
+            manager: dnf
+            xvfb_package: xorg-x11-server-Xvfb
+          - name: RHEL-compatible
+            image: rockylinux:9
+            manager: dnf
+            xvfb_package: xorg-x11-server-Xvfb
+          - name: openSUSE Leap
+            image: opensuse/leap:15.6
+            manager: zypper
+            xvfb_package: xorg-x11-Xvfb
+    runs-on: ubuntu-22.04
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - name: Download RPM artifact
+        uses: actions/download-artifact@v4.3.0
+        with:
+          name: prevent-sleep-rpm
+          path: artifacts
+
+      - name: Install RPM dependencies on DNF systems
+        if: matrix.manager == 'dnf'
+        run: |
+          dnf install -y ${{ matrix.xvfb_package }}
+          dnf install -y artifacts/*.rpm
+
+      - name: Install RPM dependencies on openSUSE
+        if: matrix.manager == 'zypper'
+        run: |
+          zypper --non-interactive refresh
+          zypper --non-interactive install --no-recommends ${{ matrix.xvfb_package }}
+          zypper --non-interactive install --no-recommends artifacts/*.rpm
+
+      - name: Smoke-test installed application
+        run: |
+          test -x /usr/bin/prevent-sleep
+          set +e
+          timeout 5s xvfb-run -a /usr/bin/prevent-sleep
+          status=$?
+          set -e
+          test "$status" -eq 124
+
+  package-appimage:
+    name: Build AppImage
+    needs: build-binary
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4.2.2
+
+      - name: Download shared executable
+        uses: actions/download-artifact@v4.3.0
+        with:
+          name: prevent-sleep-binary
+          path: dist
+
+      - name: Install AppImage validation tools
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y desktop-file-utils file xvfb
+
+      - name: Download pinned appimagetool
+        run: |
+          curl --fail --location --silent --show-error \
+            --output "$RUNNER_TEMP/appimagetool-x86_64.AppImage" \
+            "https://github.com/AppImage/appimagetool/releases/download/${APPIMAGE_TOOL_VERSION}/appimagetool-x86_64.AppImage"
+          echo "${APPIMAGE_TOOL_SHA256}  $RUNNER_TEMP/appimagetool-x86_64.AppImage" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/appimagetool-x86_64.AppImage"
+          curl --fail --location --silent --show-error \
+            --output "$RUNNER_TEMP/runtime-x86_64" \
+            "https://github.com/AppImage/type2-runtime/releases/download/${APPIMAGE_RUNTIME_VERSION}/runtime-x86_64"
+          echo "${APPIMAGE_RUNTIME_SHA256}  $RUNNER_TEMP/runtime-x86_64" | sha256sum --check
+          chmod +x "$RUNNER_TEMP/runtime-x86_64"
+
+      - name: Build and inspect AppImage
+        env:
+          APPIMAGETOOL: ${{ runner.temp }}/appimagetool-x86_64.AppImage
+          APPIMAGE_RUNTIME_FILE: ${{ runner.temp }}/runtime-x86_64
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          python3 -m linux_packaging.build_packages \
+            --format appimage \
+            --binary dist/prevent-sleep \
+            --output-dir artifacts
+          appimage=$(find "$GITHUB_WORKSPACE/artifacts" -maxdepth 1 -type f -name '*.AppImage' -print -quit)
+          test -x "$appimage"
+          mkdir extracted
+          cd extracted
+          APPIMAGE_EXTRACT_AND_RUN=1 "$appimage" --appimage-extract
+          desktop-file-validate squashfs-root/prevent-sleep.desktop
+          test -x squashfs-root/AppRun
+          test -x squashfs-root/usr/bin/prevent-sleep
+
+      - name: Smoke-test AppImage GUI
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          set +e
+          appimage=$(find artifacts -maxdepth 1 -type f -name '*.AppImage' -print -quit)
+          timeout 5s xvfb-run -a "$appimage"
+          status=$?
+          set -e
+          test "$status" -eq 124
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: prevent-sleep-appimage
+          path: artifacts/*.AppImage
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish release assets
+    if: github.ref == 'refs/tags/v1.2.0'
+    needs:
+      - package-deb
+      - package-rpm
+      - test-rpm-install
+      - package-appimage
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4.3.0
+        with:
+          pattern: prevent-sleep-*
+          path: release
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: release
+        run: sha256sum prevent-sleep_* prevent-sleep-* > SHA256SUMS
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2.2.2
+        with:
+          files: release/*
+          generate_release_notes: true

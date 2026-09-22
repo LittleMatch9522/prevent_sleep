@@ -1,4 +1,3 @@
-pyautogui==0.9.54
-pyinstaller
-psutil
-keyboard
+# The application itself uses Python's standard library.
+# PyInstaller is only needed when creating a standalone executable.
+pyinstaller==6.22.3

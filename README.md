@@ -1,128 +1,166 @@
-# 防止屏幕休眠工具 (Prevent Sleep Tool)
+# 防止睡眠工具 (Prevent Sleep Tool)
 
-一个简单但功能强大的工具，用于防止电脑屏幕进入休眠状态。通过系统级 API 和多种活动模拟策略来保持系统活跃，适用于需要防止屏幕休眠的工作环境。
+一个带图形界面的跨平台小工具，用于在工作期间阻止系统自动休眠或挂起。
 
-## 更新日志
+## 本机适配情况
 
-### v1.1.0 (2024-01-20)
-- 新增 Windows API 系统级防睡眠支持
-- 增加多种防睡眠策略：
-  - 随机鼠标移动
-  - 模拟按键操作（Scroll Lock）
-  - 模拟滚轮操作
-  - 模拟文件系统访问
-- 优化活动检测间隔（30秒）
-- 增强程序稳定性
-- 完善异常处理机制
+本项目已适配 Ubuntu/Linux：
 
-### v1.0.0 (2024-01-16)
-- 初始版本发布
-- 基础的防睡眠功能
-- 图形界面支持
-- 实时日志显示
+- 通过 `systemd-inhibit` 向 systemd-logind 注册 `idle:sleep` 抑制锁；
+- 在 GNOME 会话中同时通过 `gnome-session-inhibit` 抑制 `idle:suspend`，避免 GNOME
+  屏保/会话空闲策略单独触发；
+- 默认不模拟用户输入；勾选“启用模拟活动”后，可选执行文件、鼠标、滚轮和按键策略；
+- 使用 X11 XTest 原生接口实现鼠标/滚轮/按键，不依赖 `pyautogui`、`keyboard` 或 root；
+- 不需要 root 权限；
+- 适用于当前 Ubuntu GNOME/X11 环境，运行时只需要 Python、Tk 和系统自带的
+  `systemd-inhibit`；GNOME 桌面会额外使用 `gnome-session-inhibit`。
 
-## 功能特点
+Windows 仍使用 `SetThreadExecutionState` 系统 API。
 
-- 系统级防睡眠（Windows API）
-- 多策略活动模拟
-- 简洁的图形界面
-- 可随时启动/停止监控
-- 实时显示操作日志
-- 智能活动检测（30秒间隔）
-- 稳定可靠的运行机制
+## 功能
 
-## 下载和使用
+- 一键开始/停止防止休眠；
+- 每 30 秒检查一次原生系统抑制锁是否仍然有效；
+- 实时显示运行日志；
+- 关闭窗口前自动释放系统抑制锁；
+- Linux 和 Windows 使用各自的原生机制，不修改系统电源配置。
 
-### 方式一：直接使用
+## 环境准备
 
-1. 从 [Releases](../../releases) 页面下载最新的 `防止睡眠工具.exe`
-2. 双击运行即可，无需安装
-3. 点击"不要睡觉"按钮开始防止屏幕休眠
-4. 点击"停止监听"按钮停止程序
-5. 关闭窗口即可完全退出程序
+Ubuntu/Debian：
 
-### 方式二：从源码运行
+```bash
+sudo apt install python3-tk libx11-6 libxtst6
+```
 
-1. 克隆仓库：
-   ```bash
-   git clone https://github.com/snailuu/prevent-sleep.git
-   cd prevent-sleep
-   ```
+确认系统提供 `systemd-inhibit`：
 
-2. 安装依赖：
-   ```bash
-   # 使用国内镜像源安装依赖
-   pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-   ```
+```bash
+command -v systemd-inhibit
+command -v gnome-session-inhibit
+```
 
-3. 运行程序：
-   ```bash
-   python src/prevent_sleep.py
-   ```
+本项目在 Ubuntu GNOME、X11、Python 3.10 环境下验证过。源码运行不需要安装第三方
+运行时依赖；只有打包时需要安装 PyInstaller：
 
-## 工作原理
+```bash
+python3 -m pip install -r requirements.txt
+```
 
-程序通过多种机制防止系统休眠：
+## 运行
 
-1. 系统级防护：
-   - 使用 Windows API (SetThreadExecutionState) 
-   - 直接告知系统保持活动状态
+```bash
+python3 src/prevent_sleep.py
+```
 
-2. 活动模拟：
-   - 随机鼠标移动（小幅度）
-   - 模拟按键（Scroll Lock）
-   - 模拟滚轮操作
-   - 文件系统访问
+点击“不要睡觉”后，Linux 下可以在另一个终端查看抑制锁：
 
-3. 智能调度：
-   - 30秒间隔的活动检测
-   - 随机选择不同活动方式
-   - 异常自动恢复机制
+```bash
+systemd-inhibit --list
+```
 
-## 打包方式
+如果需要兼容原项目的活动模拟策略，勾选窗口中的“启用模拟活动（文件/鼠标/滚轮/按键）”。
+文件策略只在系统临时目录中写入、读取并删除临时文件；滚轮和按键策略会作用于当前
+焦点窗口，可能影响正在使用的应用；鼠标移动会在小范围移动后复位，因此默认关闭。
 
-如果您想自己打包程序：
+点击“停止监听”或关闭窗口后，抑制锁会被释放。
 
-1. 安装依赖：
-   ```bash
-   pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
-   ```
+## 测试
 
-2. 运行打包脚本：
-   ```bash
-   python build.py
-   ```
+```bash
+python3 -m unittest discover -s tests -v
+```
 
-3. 打包后的程序位于 `dist` 目录下
+## 打包
 
-## 注意事项
+### 构建 PyInstaller 可执行文件
 
-- 由于使用系统API和模拟操作，某些杀毒软件可能会报警，这是正常现象
-- 程序使用多种策略保持系统活动，但不会修改系统设置
-- 建议在使用前先测试程序是否适合您的工作环境
-- 程序支持随时停止，如有异常可立即关闭
+```bash
+python3 -m pip install -r requirements.txt
+python3 build.py
+```
 
-## 技术栈
+生成的可执行文件为 `dist/prevent-sleep`。该文件运行时仍需要目标 Linux 系统提供
+`systemd-inhibit` 和图形会话。
 
-- Python 3.6+
-- Windows API (ctypes)
-- tkinter (GUI界面)
-- pyautogui (鼠标控制)
-- keyboard (按键模拟)
-- PyInstaller (程序打包)
+在 Windows 上运行同一脚本会生成 `dist/防止睡眠工具.exe`。
+
+### 构建 Linux 安装包
+
+三种 Linux 包使用同一个 PyInstaller 二进制，首发目标为 x86_64：
+
+```bash
+python3 -m linux_packaging.build_packages --format all
+```
+
+输出目录为 `dist/packages/`：
+
+```text
+prevent-sleep_1.2.0_amd64.deb
+prevent-sleep-1.2.0-1.x86_64.rpm
+prevent-sleep-1.2.0-x86_64.AppImage
+```
+
+也可以指定已有的可执行文件：
+
+```bash
+python3 -m linux_packaging.build_packages \
+  --binary dist/prevent-sleep \
+  --format deb \
+  --output-dir dist/packages
+```
+
+构建 `.deb` 需要 `dpkg-deb`，构建 `.rpm` 需要 `rpmbuild`，三种格式都需要
+`file` 校验输入二进制架构；构建 AppImage 还需要 `appimagetool`，并可通过
+`APPIMAGETOOL=/path/to/appimagetool` 指定其路径。GitHub Actions 使用固定版本的
+`appimagetool` 自动生成 AppImage。
+
+安装方式：
+
+```bash
+# Debian/Ubuntu
+sudo apt install ./prevent-sleep_1.2.0_amd64.deb
+
+# Fedora/RHEL/openSUSE（具体命令按发行版选择）
+sudo dnf install ./prevent-sleep-1.2.0-1.x86_64.rpm
+sudo zypper install ./prevent-sleep-1.2.0-1.x86_64.rpm
+
+# AppImage
+chmod +x prevent-sleep-1.2.0-x86_64.AppImage
+./prevent-sleep-1.2.0-x86_64.AppImage
+```
+
+`.deb` 和 `.rpm` 会安装到 `/usr/bin/prevent-sleep`，并注册桌面菜单项和 SVG 图标。
+AppImage 不需要安装权限，但仍需要宿主系统提供图形会话、systemd 的
+`systemd-inhibit` 以及基础 Linux 运行库；“Universal”表示主流 x86_64 Linux 发行版
+之间可移植，不表示支持 ARM 或不带 systemd 的系统。
+
+GitHub Actions 会在 Pull Request 中构建并检查三种包，在推送 `v1.2.0` 标签时生成
+Release 资产和 `SHA256SUMS`。构建产物不会提交到 Git 仓库。
+
+## 目录结构
+
+```text
+src/
+  prevent_sleep.py       # Tk 图形界面与监控线程
+  sleep_inhibitor.py     # Linux/Windows 原生防睡眠后端
+  activity.py            # 文件、X11 鼠标/滚轮/按键模拟策略
+  app_metadata.py        # 应用版本、包名和目标架构
+tests/
+  test_activity.py
+  test_application.py
+  test_build.py
+  test_linux_packages.py
+  test_sleep_inhibitor.py
+build.py                 # 跨平台 PyInstaller 打包脚本
+linux_packaging/build_packages.py # Debian、RPM、AppImage 打包入口
+prevent-sleep.desktop    # 可重定位桌面入口
+```
 
 ## 许可证
 
 MIT License
 
-## 贡献
-
-欢迎提交 Issue 和 Pull Request！
-
 ## 作者
 
 [snailuu](https://github.com/snailuu)
-
-## 鸣谢
-
-感谢所有贡献者的支持！

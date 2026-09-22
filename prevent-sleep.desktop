@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=防止睡眠工具
+Comment=防止系统自动休眠
+Exec=prevent-sleep
+TryExec=prevent-sleep
+Icon=prevent-sleep
+Terminal=false
+Categories=Utility;
+StartupNotify=true
+StartupWMClass=prevent-sleep-tool
