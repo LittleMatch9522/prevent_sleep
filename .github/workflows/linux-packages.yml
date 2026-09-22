@@ -79,6 +79,9 @@ jobs:
           name: prevent-sleep-binary
           path: dist
 
+      - name: Restore executable permission
+        run: chmod 0755 dist/prevent-sleep
+
       - name: Install package validation tools
         run: sudo apt-get update && sudo apt-get install --no-install-recommends -y desktop-file-utils file
 
@@ -120,6 +123,9 @@ jobs:
         with:
           name: prevent-sleep-binary
           path: dist
+
+      - name: Restore executable permission
+        run: chmod 0755 dist/prevent-sleep
 
       - name: Build and inspect RPM package
         run: |
@@ -205,6 +211,9 @@ jobs:
         with:
           name: prevent-sleep-binary
           path: dist
+
+      - name: Restore executable permission
+        run: chmod 0755 dist/prevent-sleep
 
       - name: Install AppImage validation tools
         run: sudo apt-get update && sudo apt-get install --no-install-recommends -y desktop-file-utils file xvfb
