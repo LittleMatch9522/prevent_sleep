@@ -18,6 +18,7 @@ env:
   APPIMAGE_TOOL_SHA256: "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
   APPIMAGE_RUNTIME_VERSION: "20251108"
   APPIMAGE_RUNTIME_SHA256: "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d"
+  PYINSTALLER_BUILD_IMAGE: "python@sha256:65c6bdcca22db1a3468a0262ae05f38a0a718f51e9818cd09c12094aaae28a33"
 
 jobs:
   build-binary:
@@ -48,8 +49,20 @@ jobs:
           git diff --check
           desktop-file-validate prevent-sleep.desktop
 
-      - name: Build shared executable
-        run: python build.py
+      - name: Build shared executable on glibc 2.31 baseline
+        run: |
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --env HOME=/tmp \
+            --volume "$GITHUB_WORKSPACE:/src" \
+            --workdir /src \
+            "$PYINSTALLER_BUILD_IMAGE" \
+            bash -lc '
+              python -m venv /tmp/prevent-sleep-venv
+              /tmp/prevent-sleep-venv/bin/python -m pip install \
+                --disable-pip-version-check -r requirements.txt
+              /tmp/prevent-sleep-venv/bin/python build.py
+            '
 
       - name: Verify executable
         run: |
@@ -180,14 +193,15 @@ jobs:
         if: matrix.manager == 'dnf'
         run: |
           dnf install -y ${{ matrix.xvfb_package }}
+          dnf install -y fontconfig dejavu-sans-fonts
           dnf install -y artifacts/*.rpm
 
       - name: Install RPM dependencies on openSUSE
         if: matrix.manager == 'zypper'
         run: |
           zypper --non-interactive refresh
-          zypper --non-interactive install --no-recommends ${{ matrix.xvfb_package }}
-          zypper --non-interactive install --no-recommends artifacts/*.rpm
+          zypper --non-interactive install --no-recommends fontconfig dejavu-fonts ${{ matrix.xvfb_package }}
+          zypper --non-interactive --no-gpg-checks install --no-recommends artifacts/*.rpm
 
       - name: Smoke-test installed application
         run: |
